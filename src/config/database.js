@@ -49,13 +49,17 @@ if (rawDbUrl && (rawDbUrl.startsWith('postgres') || rawDbUrl.includes('@'))) {
   function transformSql(sql) {
     if (typeof sql !== 'string') return sql;
     let s = sql;
+    // 0. Transformasi CURRENT_DATE() -> CURRENT_DATE (Postgres tidak pakai tanda kurung)
+    s = s.replace(/\bCURRENT_DATE\(\)/gi, 'CURRENT_DATE');
     // 1. Transformasi fungsi tanggal & agregat MySQL -> PostgreSQL
     s = s.replace(/\bMONTH\(([^)]+)\)/gi, (m, c) => `EXTRACT(MONTH FROM ${c})`);
     s = s.replace(/\bYEAR\(([^)]+)\)/gi, (m, c) => `EXTRACT(YEAR FROM ${c})`);
+    s = s.replace(/\bDATE_FORMAT\(([^,]+),\s*'%Y-%m-01'\)/gi, (m, c) => `TO_CHAR(${c}, 'YYYY-MM-01')`);
     s = s.replace(/\bDATE_FORMAT\(([^,]+),\s*'%Y-%m-%d'\)/gi, (m, c) => `TO_CHAR(${c}, 'YYYY-MM-DD')`);
     s = s.replace(/\bDATE_FORMAT\(([^,]+),\s*'%Y-%m'\)/gi, (m, c) => `TO_CHAR(${c}, 'YYYY-MM')`);
     s = s.replace(/\bDATE_ADD\(([^,]+),\s*INTERVAL\s+(\d+)\s+DAY\)/gi, (m, c, d) => `(${c} + INTERVAL '${d} days')`);
     s = s.replace(/\bDATE_SUB\(([^,]+),\s*INTERVAL\s+(\d+)\s+DAY\)/gi, (m, c, d) => `(${c} - INTERVAL '${d} days')`);
+    s = s.replace(/\bDATE_SUB\(([^,]+),\s*INTERVAL\s+(\d+)\s+MONTH\)/gi, (m, c, d) => `(${c} - INTERVAL '${d} months')`);
     s = s.replace(/\bGROUP_CONCAT\(DISTINCT\s+([^)]+)\s+SEPARATOR\s+('[^']+')\)/gi, (m, c, sep) => `STRING_AGG(DISTINCT ${c}::text, ${sep})`);
     s = s.replace(/\bGROUP_CONCAT\(([^)]+)\s+SEPARATOR\s+('[^']+')\)/gi, (m, c, sep) => `STRING_AGG(${c}::text, ${sep})`);
 
