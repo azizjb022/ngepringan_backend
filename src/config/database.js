@@ -1,51 +1,106 @@
-// const mysql = require('mysql2/promise'); // <-- WAJIB /promise
-// require('dotenv').config();
-
-// const pool = mysql.createPool({
-//   host: process.env.DB_HOST || 'localhost',
-//   user: process.env.DB_USER || 'root',
-//   password: process.env.DB_PASSWORD || '',
-//   database: process.env.DB_NAME || 'ngepringan',
-//   port: Number(process.env.DB_PORT) || 3306,
-//   waitForConnections: true,
-//   connectionLimit: 10,
-//   queueLimit: 0,
-//   timezone: '+07:00',
-//   charset: 'utf8mb4'
-// });
-
-// // Tes koneksi saat inisialisasi
-// pool.getConnection()
-//   .then(conn => {
-//     console.log('✅ Berhasil terhubung ke database MySQL [ngepringan]');
-//     conn.release();
-//   })
-//   .catch(err => {
-//     console.error('❌ Gagal koneksi ke database:', err.message);
-//   });
-
-// module.exports = pool;
-
-
-const { Pool } = require('pg');
 require('dotenv').config();
 
-// Menggunakan connectionString dari process.env.DATABASE_URL
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false // Wajib untuk koneksi ke Supabase/cloud database
-  }
-});
+let pool;
 
-// Tes koneksi saat inisialisasi
-pool.connect()
-  .then(client => {
-    console.log('✅ Berhasil terhubung ke database Supabase (PostgreSQL) [ngepringan]');
-    client.release();
-  })
-  .catch(err => {
-    console.error('❌ Gagal koneksi ke database Supabase:', err.message);
+if (process.env.DATABASE_URL) {
+  // ========================================================
+  // CLOUD DATABASE: POSTGRESQL / SUPABASE (Untuk Vercel / Cloud)
+  // ========================================================
+  const { Pool } = require('pg');
+
+  const pgPool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: {
+      rejectUnauthorized: false
+    }
   });
+
+  // Helper untuk mentransformasikan query MySQL ke PostgreSQL
+  function transformSql(sql) {
+    if (typeof sql !== 'string') return sql;
+    let s = sql;
+    // 1. Transformasi fungsi tanggal & agregat MySQL -> PostgreSQL
+    s = s.replace(/\bMONTH\(([^)]+)\)/gi, (m, c) => `EXTRACT(MONTH FROM ${c})`);
+    s = s.replace(/\bYEAR\(([^)]+)\)/gi, (m, c) => `EXTRACT(YEAR FROM ${c})`);
+    s = s.replace(/\bDATE_FORMAT\(([^,]+),\s*'%Y-%m-%d'\)/gi, (m, c) => `TO_CHAR(${c}, 'YYYY-MM-DD')`);
+    s = s.replace(/\bDATE_FORMAT\(([^,]+),\s*'%Y-%m'\)/gi, (m, c) => `TO_CHAR(${c}, 'YYYY-MM')`);
+    s = s.replace(/\bDATE_ADD\(([^,]+),\s*INTERVAL\s+(\d+)\s+DAY\)/gi, (m, c, d) => `(${c} + INTERVAL '${d} days')`);
+    s = s.replace(/\bDATE_SUB\(([^,]+),\s*INTERVAL\s+(\d+)\s+DAY\)/gi, (m, c, d) => `(${c} - INTERVAL '${d} days')`);
+    s = s.replace(/\bGROUP_CONCAT\(DISTINCT\s+([^)]+)\s+SEPARATOR\s+('[^']+')\)/gi, (m, c, sep) => `STRING_AGG(DISTINCT ${c}::text, ${sep})`);
+    s = s.replace(/\bGROUP_CONCAT\(([^)]+)\s+SEPARATOR\s+('[^']+')\)/gi, (m, c, sep) => `STRING_AGG(${c}::text, ${sep})`);
+
+    // 2. Transformasi parameter ? -> $1, $2, $3, ...
+    let paramIndex = 0;
+    s = s.replace(/\?/g, () => `$${++paramIndex}`);
+    return s;
+  }
+
+  // Wrapper query agar kompatibel dengan pemanggilan gaya MySQL: const [rows] = await pool.query(sql, params)
+  async function executePgQuery(clientOrPool, sql, params = []) {
+    const finalSql = transformSql(sql);
+    const result = await clientOrPool.query(finalSql, params);
+    const rows = result.rows || [];
+    // Simulasikan properti insertId dan affectedRows milik MySQL
+    if (result.rowCount !== undefined) {
+      rows.affectedRows = result.rowCount;
+    }
+    if (rows[0] && rows[0].id) {
+      rows.insertId = rows[0].id;
+    }
+    return [rows, result.fields];
+  }
+
+  pool = {
+    query: (sql, params) => executePgQuery(pgPool, sql, params),
+    getConnection: async () => {
+      const client = await pgPool.connect();
+      return {
+        query: (sql, params) => executePgQuery(client, sql, params),
+        beginTransaction: () => client.query('BEGIN'),
+        commit: () => client.query('COMMIT'),
+        rollback: () => client.query('ROLLBACK'),
+        release: () => client.release(),
+      };
+    },
+    end: () => pgPool.end(),
+  };
+
+  pgPool.connect()
+    .then(client => {
+      console.log('✅ Berhasil terhubung ke database Supabase (PostgreSQL)');
+      client.release();
+    })
+    .catch(err => {
+      console.error('❌ Gagal koneksi ke database PostgreSQL:', err.message);
+    });
+
+} else {
+  // ========================================================
+  // LOCAL DATABASE: MYSQL (XAMPP / Komputer Lokal)
+  // ========================================================
+  const mysql = require('mysql2/promise');
+
+  pool = mysql.createPool({
+    host: process.env.DB_HOST || 'localhost',
+    user: process.env.DB_USER || 'root',
+    password: process.env.DB_PASSWORD || '',
+    database: process.env.DB_NAME || 'ngepringan',
+    port: Number(process.env.DB_PORT) || 3306,
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0,
+    timezone: '+07:00',
+    charset: 'utf8mb4'
+  });
+
+  pool.getConnection()
+    .then(conn => {
+      console.log('✅ Berhasil terhubung ke database MySQL [ngepringan]');
+      conn.release();
+    })
+    .catch(err => {
+      console.error('❌ Gagal koneksi ke database MySQL:', err.message);
+    });
+}
 
 module.exports = pool;
