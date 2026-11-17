@@ -2,20 +2,48 @@ require('dotenv').config();
 
 let pool;
 
-if (process.env.DATABASE_URL) {
+let rawDbUrl = String(process.env.DATABASE_URL || '').trim();
+rawDbUrl = rawDbUrl.replace(/^DATABASE_URL\s*=\s*/i, '');
+rawDbUrl = rawDbUrl.replace(/^psql\s+/i, '');
+rawDbUrl = rawDbUrl.replace(/^["']+|["']+$/g, '').trim();
+
+if (rawDbUrl && (rawDbUrl.startsWith('postgres') || rawDbUrl.includes('@'))) {
   // ========================================================
   // CLOUD DATABASE: POSTGRESQL / SUPABASE (Untuk Vercel / Cloud)
   // ========================================================
   const { Pool } = require('pg');
 
-  const cleanDbUrl = String(process.env.DATABASE_URL || '').trim().replace(/^["']|["']$/g, '');
-
-  const pgPool = new Pool({
-    connectionString: cleanDbUrl,
+  let poolConfig = {
     ssl: {
       rejectUnauthorized: false
     }
-  });
+  };
+
+  // Ekstraksi parameter database mandiri agar karakter khusus pada password tidak memicu "Invalid URL"
+  const uriRegex = /^(?:postgres(?:ql)?:\/\/)?([^:]+):(.*)@([^:/]+)(?::(\d+))?(?:\/([^?#]+))?(?:[?#].*)?$/;
+  const match = rawDbUrl.match(uriRegex);
+
+  if (match) {
+    const [, user, password, host, port, database] = match;
+    poolConfig.user = user;
+    poolConfig.password = password;
+    poolConfig.host = host;
+    poolConfig.port = Number(port) || 5432;
+    poolConfig.database = database || 'postgres';
+  } else {
+    try {
+      const u = new URL(rawDbUrl);
+      poolConfig.user = decodeURIComponent(u.username);
+      poolConfig.password = decodeURIComponent(u.password);
+      poolConfig.host = u.hostname;
+      poolConfig.port = Number(u.port) || 5432;
+      poolConfig.database = u.pathname.replace(/^\//, '') || 'postgres';
+    } catch {
+      poolConfig.connectionString = rawDbUrl;
+    }
+  }
+
+  const pgPool = new Pool(poolConfig);
 
   // Helper untuk mentransformasikan query MySQL ke PostgreSQL
   function transformSql(sql) {
