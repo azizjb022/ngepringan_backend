@@ -51,8 +51,10 @@ if (rawDbUrl && (rawDbUrl.startsWith('postgres') || rawDbUrl.includes('@'))) {
     let s = sql;
     // 0. Transformasi CURRENT_DATE() -> CURRENT_DATE (Postgres tidak pakai tanda kurung)
     s = s.replace(/\bCURRENT_DATE\(\)/gi, 'CURRENT_DATE');
-    // 0.1 Transformasi nested DATE_SUB di dalam DATE_FORMAT
-    s = s.replace(/DATE_FORMAT\(DATE_SUB\(CURRENT_DATE(?:\(\))?,\s*INTERVAL\s+(\d+)\s+MONTH\),\s*'%Y-%m-01'\)/gi, (m, d) => `TO_CHAR(CURRENT_DATE - INTERVAL '${d} months', 'YYYY-MM-01')`);
+    // 0.1 Transformasi nested DATE_SUB di dalam DATE_FORMAT menjadi cast ::date
+    s = s.replace(/DATE_FORMAT\(DATE_SUB\(CURRENT_DATE(?:\(\))?,\s*INTERVAL\s+(\d+)\s+MONTH\),\s*'%Y-%m-01'\)/gi, (m, d) => `TO_CHAR(CURRENT_DATE - INTERVAL '${d} months', 'YYYY-MM-01')::date`);
+    // 0.2 Transformasi boolean sum: SUM(col = 'val') -> SUM(CASE WHEN col = 'val' THEN 1 ELSE 0 END)
+    s = s.replace(/\bSUM\(([a-zA-Z0-9_]+)\s*=\s*('[^']+'|\w+)\)/gi, (m, col, val) => `SUM(CASE WHEN ${col} = ${val} THEN 1 ELSE 0 END)`);
     // 1. Transformasi fungsi tanggal & agregat MySQL -> PostgreSQL
     s = s.replace(/\bMONTH\(([^)]+)\)/gi, (m, c) => `EXTRACT(MONTH FROM ${c})`);
     s = s.replace(/\bYEAR\(([^)]+)\)/gi, (m, c) => `EXTRACT(YEAR FROM ${c})`);
