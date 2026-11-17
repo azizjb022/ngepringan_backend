@@ -74,6 +74,21 @@ if (process.env.DATABASE_URL) {
       console.error('❌ Gagal koneksi ke database PostgreSQL:', err.message);
     });
 
+} else if (process.env.VERCEL) {
+  // ========================================================
+  // CLOUD ENVIRONMENT (VERCEL) TAPI DATABASE_URL BELUM DIATUR
+  // ========================================================
+  console.error('❌ PERINGATAN: DATABASE_URL belum diatur di Vercel Environment Variables!');
+  pool = {
+    query: async () => {
+      throw new Error('DATABASE_URL belum diatur di Vercel Environment Variables. Silakan tambahkan connection string database Anda di Vercel Settings -> Environment Variables.');
+    },
+    getConnection: async () => {
+      throw new Error('DATABASE_URL belum diatur di Vercel Environment Variables.');
+    },
+    end: () => Promise.resolve(),
+  };
+
 } else {
   // ========================================================
   // LOCAL DATABASE: MYSQL (XAMPP / Komputer Lokal)
@@ -93,14 +108,16 @@ if (process.env.DATABASE_URL) {
     charset: 'utf8mb4'
   });
 
-  pool.getConnection()
-    .then(conn => {
-      console.log('✅ Berhasil terhubung ke database MySQL [ngepringan]');
-      conn.release();
-    })
-    .catch(err => {
-      console.error('❌ Gagal koneksi ke database MySQL:', err.message);
-    });
+  if (!process.env.VERCEL) {
+    pool.getConnection()
+      .then(conn => {
+        console.log('✅ Berhasil terhubung ke database MySQL [ngepringan]');
+        conn.release();
+      })
+      .catch(err => {
+        console.error('❌ Gagal koneksi ke database MySQL:', err.message);
+      });
+  }
 }
 
 module.exports = pool;
