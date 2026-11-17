@@ -8,8 +8,10 @@ if (process.env.DATABASE_URL) {
   // ========================================================
   const { Pool } = require('pg');
 
+  const cleanDbUrl = String(process.env.DATABASE_URL || '').trim().replace(/^["']|["']$/g, '');
+
   const pgPool = new Pool({
-    connectionString: process.env.DATABASE_URL,
+    connectionString: cleanDbUrl,
     ssl: {
       rejectUnauthorized: false
     }
