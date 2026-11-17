@@ -14,7 +14,7 @@ const verifyToken = (req, res, next) => {
   }
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'ngepringan_super_secret_key_2026_jwt');
     req.user = decoded;
     next();
   } catch (error) {

@@ -28,7 +28,7 @@ exports.loginUser = async (username, password) => {
 
   const token = jwt.sign(
     { id: user.id, nama: user.nama, username: user.username, role: user.role, rt: user.rt },
-    process.env.JWT_SECRET,
+    process.env.JWT_SECRET || 'ngepringan_super_secret_key_2026_jwt',
     { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
   );
 
