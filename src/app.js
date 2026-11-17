@@ -12,7 +12,14 @@ const wargaRoutes = require('./routes/wargaRoutes');
 
 const app = express();
 
-app.use(cors());
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+}));
+
+app.options('*', cors());
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan('dev'));
@@ -32,4 +39,12 @@ app.get('/', (req, res) => {
   res.json({ message: 'API Karang Taruna Dusun Ngepringan Berjalan!', status: 'online' });
 });
 
-module.exports = app; // <-- Bagian ini wajib ada
+app.use((err, req, res, next) => {
+  console.error('Unhandled server error:', err);
+  res.status(err.status || 500).json({
+    success: false,
+    message: err.message || 'Terjadi kesalahan pada server.',
+  });
+});
+
+module.exports = app;
