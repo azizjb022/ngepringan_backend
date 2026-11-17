@@ -31,7 +31,10 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 // Static folder untuk file upload
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+const uploadsPath = process.env.VERCEL
+  ? path.join('/tmp', 'uploads')
+  : path.join(__dirname, '../uploads');
+app.use('/uploads', express.static(uploadsPath));
 
 // Routes: Mendukung /api/xxx maupun /xxx untuk kompatibilitas Vercel Serverless
 app.use(['/api/auth', '/auth'], authRoutes);

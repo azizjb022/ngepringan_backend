@@ -65,14 +65,20 @@ if (process.env.DATABASE_URL) {
     end: () => pgPool.end(),
   };
 
-  pgPool.connect()
-    .then(client => {
-      console.log('✅ Berhasil terhubung ke database Supabase (PostgreSQL)');
-      client.release();
-    })
-    .catch(err => {
-      console.error('❌ Gagal koneksi ke database PostgreSQL:', err.message);
-    });
+  pgPool.on('error', (err) => {
+    console.error('Unexpected idle client error in PostgreSQL pool:', err.message);
+  });
+
+  if (!process.env.VERCEL) {
+    pgPool.connect()
+      .then(client => {
+        console.log('✅ Berhasil terhubung ke database Supabase (PostgreSQL)');
+        client.release();
+      })
+      .catch(err => {
+        console.error('❌ Gagal koneksi ke database PostgreSQL:', err.message);
+      });
+  }
 
 } else if (process.env.VERCEL) {
   // ========================================================
