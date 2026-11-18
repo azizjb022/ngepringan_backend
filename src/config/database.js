@@ -56,6 +56,7 @@ if (rawDbUrl && (rawDbUrl.startsWith('postgres') || rawDbUrl.includes('@'))) {
     // 0.2 Transformasi boolean sum: SUM(col = 'val') -> SUM(CASE WHEN col = 'val' THEN 1 ELSE 0 END)
     s = s.replace(/\bSUM\(([a-zA-Z0-9_]+)\s*=\s*('[^']+'|\w+)\)/gi, (m, col, val) => `SUM(CASE WHEN ${col} = ${val} THEN 1 ELSE 0 END)`);
     // 1. Transformasi fungsi tanggal & agregat MySQL -> PostgreSQL
+    s = s.replace(/\bDAY\(([^)]+)\)/gi, (m, c) => `EXTRACT(DAY FROM ${c})`);
     s = s.replace(/\bMONTH\(([^)]+)\)/gi, (m, c) => `EXTRACT(MONTH FROM ${c})`);
     s = s.replace(/\bYEAR\(([^)]+)\)/gi, (m, c) => `EXTRACT(YEAR FROM ${c})`);
     s = s.replace(/\bDATE_FORMAT\(([^,]+),\s*'%Y-%m-01'\)/gi, (m, c) => `TO_CHAR(${c}, 'YYYY-MM-01')`);

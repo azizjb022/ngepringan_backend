@@ -1234,7 +1234,7 @@ exports.fetchMatrixRekap = async (filters = {}) => {
 
   // Ambil seluruh pembayaran jimpitan yang relevan (dalam rentang tanggal ini, atau setelahnya yang melunasi periode ini)
   let jimpitanQuery = `
-    SELECT warga_id, rt, tanggal, DAY(tanggal) AS hari, nominal, jumlah_hari, status_lapangan, metode_bayar
+    SELECT warga_id, rt, tanggal, EXTRACT(DAY FROM tanggal) AS hari, nominal, jumlah_hari, status_lapangan, metode_bayar
     FROM jimpitan
     WHERE (
       (tanggal >= ? AND tanggal <= ?)
