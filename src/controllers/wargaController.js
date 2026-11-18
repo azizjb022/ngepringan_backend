@@ -90,3 +90,16 @@ exports.deleteWarga = async (req, res) => {
     return res.status(error.status || 500).json({ success: false, message: error.message });
   }
 };
+
+exports.seedRt03AndPetugas = async (req, res) => {
+  try {
+    const result = await wargaService.seedRt03AndPetugas();
+    return res.status(200).json({
+      success: true,
+      message: 'Seeding warga RT 03 dan Petugas RT berhasil!',
+      data: result,
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
