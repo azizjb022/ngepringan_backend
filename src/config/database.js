@@ -62,9 +62,9 @@ if (rawDbUrl && (rawDbUrl.startsWith('postgres') || rawDbUrl.includes('@'))) {
     s = s.replace(/\bDATE_FORMAT\(([^,]+),\s*'%Y-%m-01'\)/gi, (m, c) => `TO_CHAR(${c}, 'YYYY-MM-01')`);
     s = s.replace(/\bDATE_FORMAT\(([^,]+),\s*'%Y-%m-%d'\)/gi, (m, c) => `TO_CHAR(${c}, 'YYYY-MM-DD')`);
     s = s.replace(/\bDATE_FORMAT\(([^,]+),\s*'%Y-%m'\)/gi, (m, c) => `TO_CHAR(${c}, 'YYYY-MM')`);
-    s = s.replace(/\bDATE_ADD\(([^,]+),\s*INTERVAL\s+(\d+)\s+DAY\)/gi, (m, c, d) => `(${c} + INTERVAL '${d} days')`);
-    s = s.replace(/\bDATE_SUB\(([^,]+),\s*INTERVAL\s+(\d+)\s+DAY\)/gi, (m, c, d) => `(${c} - INTERVAL '${d} days')`);
-    s = s.replace(/\bDATE_SUB\(([^,]+),\s*INTERVAL\s+(\d+)\s+MONTH\)/gi, (m, c, d) => `(${c} - INTERVAL '${d} months')`);
+    s = s.replace(/\bDATE_ADD\(([^,]+),\s*INTERVAL\s+(\d+)\s+DAY\)/gi, (m, c, d) => `(${c}::date + INTERVAL '${d} days')`);
+    s = s.replace(/\bDATE_SUB\(([^,]+),\s*INTERVAL\s+(\d+)\s+DAY\)/gi, (m, c, d) => `(${c}::date - INTERVAL '${d} days')`);
+    s = s.replace(/\bDATE_SUB\(([^,]+),\s*INTERVAL\s+(\d+)\s+MONTH\)/gi, (m, c, d) => `(${c}::date - INTERVAL '${d} months')`);
     s = s.replace(/\bGROUP_CONCAT\(DISTINCT\s+([^)]+)\s+SEPARATOR\s+('[^']+')\)/gi, (m, c, sep) => `STRING_AGG(DISTINCT ${c}::text, ${sep})`);
     s = s.replace(/\bGROUP_CONCAT\(([^)]+)\s+SEPARATOR\s+('[^']+')\)/gi, (m, c, sep) => `STRING_AGG(${c}::text, ${sep})`);
 
