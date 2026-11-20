@@ -430,61 +430,138 @@ exports.fetchProgress = async ({ rt, tanggal }) => {
     [tanggal, rt]
   );
 
+  const addDaysToIsoDate = (dateStr, days) => {
+    const d = new Date(`${dateStr}T00:00:00`);
+    d.setDate(d.getDate() + Number(days));
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
   const [historyRows] = await pool.query(
-    `SELECT warga_id, MIN(tanggal) AS tanggal_awal, COALESCE(SUM(nominal), 0) AS total_bayar
+    `SELECT
+       warga_id,
+       MIN(tanggal) AS tanggal_awal,
+       COALESCE(SUM(CASE WHEN nominal > 0 AND status_lapangan NOT IN ('kosong_nihil', 'rumah_tutup_mudik') THEN nominal ELSE 0 END), 0) AS total_bayar,
+       COALESCE(SUM(CASE WHEN nominal > 0 AND status_lapangan NOT IN ('kosong_nihil', 'rumah_tutup_mudik') THEN jumlah_hari ELSE 0 END), 0) AS total_hari_bayar
      FROM jimpitan
      WHERE rt = ? AND tanggal <= ?
      GROUP BY warga_id`,
     [rt, tanggal]
   );
   const historyMap = new Map(historyRows.map((row) => [row.warga_id, row]));
+
+  // Ambil transaksi bayar terakhir per warga untuk mengetahui petugas pencatat terakhir
+  const [latestPayments] = await pool.query(
+    `SELECT j.warga_id, j.tanggal, j.jumlah_hari, j.nominal, j.status_lapangan, j.metode_bayar, u.nama AS petugas_nama
+     FROM jimpitan j
+     LEFT JOIN users u ON j.petugas_id = u.id
+     INNER JOIN (
+       SELECT warga_id, MAX(id) AS max_id
+       FROM jimpitan
+       WHERE rt = ? AND tanggal <= ? AND nominal > 0 AND status_lapangan NOT IN ('kosong_nihil', 'rumah_tutup_mudik')
+       GROUP BY warga_id
+     ) lj ON j.id = lj.max_id`,
+    [rt, tanggal]
+  );
+  const latestPaymentMap = new Map(latestPayments.map((p) => [p.warga_id, p]));
+
   rows.forEach((row) => {
     const history = historyMap.get(row.id);
+    const latestPay = latestPaymentMap.get(row.id);
+
     const tanggalAwal = history?.tanggal_awal
       ? (history.tanggal_awal instanceof Date ? history.tanggal_awal.toISOString().split('T')[0] : String(history.tanggal_awal).split('T')[0])
       : tanggal;
-    const hariWajib = Math.max(1, Math.floor((new Date(`${tanggal}T00:00:00`) - new Date(`${tanggalAwal}T00:00:00`)) / 86400000) + 1);
-    const tunggakan = Math.max(0, hariWajib * JIMPITAN_PER_HARI - Number(history?.total_bayar || 0));
 
-    // Lunas hari ini jika tercatat dan nominal > 0 serta status bukan kosong_nihil atau rumah_tutup_mudik
-    const isLunasHariIni = Boolean(
+    // Jumlah hari wajib dari tanggal awal s/d tanggal ronda hari ini (inklusif)
+    const hariWajib = Math.max(1, Math.floor((new Date(`${tanggal}T00:00:00`) - new Date(`${tanggalAwal}T00:00:00`)) / 86400000) + 1);
+    const totalBayar = Number(history?.total_bayar || 0);
+    const totalHariBayar = Math.round(totalBayar / JIMPITAN_PER_HARI);
+
+    // Hitung tunggakan dan surplus
+    const tunggakan = Math.max(0, hariWajib * JIMPITAN_PER_HARI - totalBayar);
+    const surplusHari = totalHariBayar - hariWajib;
+
+    // 1. Cek apakah ada pencatatan pembayaran langsung hari ini (misal bayar malam ini)
+    const isPaidDirectToday = Boolean(
       row.jimpitan_id &&
       Number(row.nominal) > 0 &&
       row.status_lapangan !== 'kosong_nihil' &&
       row.status_lapangan !== 'rumah_tutup_mudik'
     );
 
-    // KETENTUAN USER: Jika kosong/nihil maka nominal kurangnya TIDAK 0!
-    // Minimal 1 hari tarif (Rp 500) atau sebesar total tunggakan yang ada
-    const nominalKurang = isLunasHariIni ? 0 : Math.max(JIMPITAN_PER_HARI, tunggakan);
-    const hariKurang = Math.max(1, Math.ceil(nominalKurang / JIMPITAN_PER_HARI));
+    // 2. Cek apakah warga sudah lunas karena bayar di muka (advance payment) sebelumnya
+    const isLunasAdvance = !isPaidDirectToday && (surplusHari >= 0) && (totalHariBayar > 0);
+    const isLunasHariIni = isPaidDirectToday || isLunasAdvance;
+
+    // Hitung tanggal lunas s/d kapan
+    let lunasSampai = null;
+    let sisaHariLunas = 0;
+
+    if (surplusHari >= 0 && totalHariBayar > 0) {
+      lunasSampai = addDaysToIsoDate(tanggal, surplusHari);
+      sisaHariLunas = surplusHari;
+    } else if (isPaidDirectToday) {
+      const extraDays = Math.max(0, (row.jumlah_hari || 1) - 1);
+      lunasSampai = addDaysToIsoDate(tanggal, extraDays);
+      sisaHariLunas = extraDays;
+    }
+
+    // Nominal kurang dan hari kurang jika belum lunas
+    let nominalKurang = 0;
+    let hariKurang = 0;
+    if (!isLunasHariIni) {
+      nominalKurang = Math.max(JIMPITAN_PER_HARI, tunggakan);
+      hariKurang = Math.max(1, Math.ceil(nominalKurang / JIMPITAN_PER_HARI));
+    }
+
+    // Keterangan petugas yang mencatat pembayaran
+    let displayPetugas = row.petugas;
+    if (!displayPetugas && isLunasAdvance && latestPay?.petugas_nama) {
+      const tglPay = latestPay.tanggal instanceof Date
+        ? latestPay.tanggal.toISOString().split('T')[0]
+        : String(latestPay.tanggal).split('T')[0];
+      displayPetugas = `${latestPay.petugas_nama} (catat tgl ${tglPay})`;
+    }
 
     row.tunggakan = tunggakan;
     row.nominal_kurang = nominalKurang;
     row.hari_kurang = hariKurang;
     row.is_lunas = isLunasHariIni;
-    row.nominal_tampil = isLunasHariIni ? Number(row.nominal || 0) : -nominalKurang;
+    row.is_advance = isLunasAdvance;
+    row.lunas_sampai = lunasSampai;
+    row.sisa_hari_lunas = sisaHariLunas;
+    row.petugas_display = displayPetugas || row.petugas;
+    row.nominal_tampil = isPaidDirectToday ? Number(row.nominal || 0) : (isLunasAdvance ? 0 : -nominalKurang);
   });
 
   const lunasRows = rows.filter((r) => r.is_lunas);
-  const totalTerkumpul = lunasRows.reduce((sum, r) => sum + Number(r.nominal || 0), 0);
+  // Total uang fisik yang terkumpul hari ini (hanya uang yang dicatat langsung pada tanggal ini)
+  const totalTerkumpul = rows
+    .filter((r) => r.jimpitan_id && Number(r.nominal) > 0 && r.status_lapangan !== 'kosong_nihil' && r.status_lapangan !== 'rumah_tutup_mudik')
+    .reduce((sum, r) => sum + Number(r.nominal || 0), 0);
 
   const counts = {
     lunas: lunasRows.length,
     titip_tetangga: rows.filter((r) => r.status_lapangan === 'titip_tetangga' && r.is_lunas).length,
-    kosong_nihil: rows.filter((r) => r.status_lapangan === 'kosong_nihil').length,
-    rumah_tutup_mudik: rows.filter((r) => r.status_lapangan === 'rumah_tutup_mudik').length,
+    kosong_nihil: rows.filter((r) => r.status_lapangan === 'kosong_nihil' && !r.is_lunas).length,
+    rumah_tutup_mudik: rows.filter((r) => r.status_lapangan === 'rumah_tutup_mudik' && !r.is_lunas).length,
+    lunas_advance: rows.filter((r) => r.is_advance).length,
   };
 
   const perPetugasMap = new Map();
-  lunasRows.forEach((r) => {
-    const key = r.petugas || 'Tidak diketahui';
-    if (!perPetugasMap.has(key)) {
-      perPetugasMap.set(key, { petugas: key, jumlah: 0, nominal: 0 });
+  rows.forEach((r) => {
+    if (r.jimpitan_id && Number(r.nominal) > 0 && r.status_lapangan !== 'kosong_nihil' && r.status_lapangan !== 'rumah_tutup_mudik') {
+      const key = r.petugas || 'Tidak diketahui';
+      if (!perPetugasMap.has(key)) {
+        perPetugasMap.set(key, { petugas: key, jumlah: 0, nominal: 0 });
+      }
+      const item = perPetugasMap.get(key);
+      item.jumlah += 1;
+      item.nominal += Number(r.nominal || 0);
     }
-    const item = perPetugasMap.get(key);
-    item.jumlah += 1;
-    item.nominal += Number(r.nominal || 0);
   });
 
   return {
@@ -507,19 +584,25 @@ exports.fetchProgress = async ({ rt, tanggal }) => {
       no_hp: r.no_hp,
       saldo_deposit: Number(r.saldo_deposit || 0),
       sudah_bayar: Boolean(r.is_lunas),
-      sudah_dikunjungi: Boolean(r.jimpitan_id),
+      sudah_dikunjungi: Boolean(r.jimpitan_id || r.is_advance),
+      is_advance: Boolean(r.is_advance),
+      lunas_sampai: r.lunas_sampai || null,
+      sisa_hari_lunas: Number(r.sisa_hari_lunas || 0),
+      keterangan_lunas: r.is_advance
+        ? `Lunas di Muka s/d ${r.lunas_sampai}`
+        : (r.is_lunas ? 'Lunas Hari Ini' : 'Belum Lunas'),
       nominal_kurang: Number(r.nominal_kurang || 0),
-      hari_kurang: Number(r.hari_kurang || 1),
+      hari_kurang: Number(r.hari_kurang || 0),
       jimpitan_id: r.jimpitan_id,
-      nominal: r.nominal ? Number(r.nominal) : 0,
+      nominal: r.jimpitan_id && r.nominal ? Number(r.nominal) : 0,
       nominal_tampil: Number(r.nominal_tampil || 0),
       tunggakan: Number(r.tunggakan || 0),
       jumlah_hari: r.jumlah_hari || 0,
-      status_lapangan: r.status_lapangan || (r.is_lunas ? 'lunas' : 'belum'),
+      status_lapangan: r.is_advance ? 'lunas' : (r.status_lapangan || (r.is_lunas ? 'lunas' : 'belum')),
       catatan_lapangan: r.catatan_lapangan,
       metode_bayar: r.metode_bayar || 'tunai',
       status_setor: r.status_setor,
-      petugas: r.petugas,
+      petugas: r.petugas_display || r.petugas,
       created_by_nama: r.created_by_nama,
       updated_by_nama: r.updated_by_nama,
     })),
